@@ -36,6 +36,67 @@ export default function Home() {
   const [user, setUser] = useState<GitHubUser | null>(null);
 
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
+  const [keywords, setKeywords] = useState("");
+  const [filteredRepos, setFilteredRepos] = useState<GitHubRepo[]>([]);
+  const [isFiltering, setIsFiltering] = useState(false);
+  
+
+  const rankRepositories = (searchKeywords: string, repoList: GitHubRepo[]) => {
+    if(!searchKeywords.trim()){
+      setFilteredRepos([]);
+      return;
+    }
+
+    const terms = searchKeywords.toLowerCase().split(/\s+/).filter(t => t.length > 0);
+    const scored = repoList.map((repo) => {
+      let score = 0;
+
+      terms.forEach((term) => {
+        if(repo.name.toLowerCase().includes(term)) score += 50;
+       if (repo.description?.toLowerCase().includes(term)) score += 30;
+        
+      if(repo.language?.toLowerCase() === term) score += 25;
+      else if (repo.language?.toLowerCase().includes(term)) score += 15;
+    });
+
+
+      const starBonus = repo.stargazers_count > 0 
+      ? Math.log10(repo.stargazers_count + 1) * 15 
+      : 0;
+    score += starBonus;
+
+    const forkBonus = repo.forks_count > 0
+      ? Math.log10(repo.forks_count + 1) * 10
+      : 0;
+    score += forkBonus;
+
+    const daysSinceUpdate = (Date.now() - new Date(repo.updated_at).getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSinceUpdate < 30) score += 20;
+    else if (daysSinceUpdate < 90) score += 10;
+
+    return { ...repo, score };
+  });
+
+  // FIX 3: Filter out repos with 0 score (no matches at all)
+  const relevant = scored.filter(repo => repo.score > 0);
+  
+  relevant.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return b.stargazers_count - a.stargazers_count;
+  });
+
+  // After sorting, find max score
+  const maxScore = Math.max(...relevant.map(r => r.score));
+const normalized = relevant.map(r => ({
+  ...r,
+  matchPercent: maxScore > 0 ? Math.round((r.score / maxScore) * 100) : 0
+}));
+  
+  setFilteredRepos(relevant);
+  setIsFiltering(false);
+}
+
+
 
   const handlesubmit = async (e: React.FormEvent) => {
 
@@ -97,108 +158,91 @@ export default function Home() {
         </form>
     </div>
 
-          {user && (
-            <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-lg overflow-hidden">
-              <div className="bg-gradient-to-r from-blue-600 to-blue-800 p-8 text-white">
-              <div className="flex items-center gap-6">
-                <img 
-                  src={user.avatar_url}
-                  alt={`${user.login}'s avatar`}
-                  className="w-24 h-24 rounded-full border-4 border-white shadow-md"                
-                />
-                <div>
-                  <h2 className="text-3xl font-bold">
-                    {user.name || user.login}
-                  </h2>
-                  <p className="text-blue-100 text-lg">
-                    @{user.login}
-                  </p>
-                  {user.bio && (
-                    <p className="mt-2 text-blue-50">
-                      {user.bio}
+      {user && (
+  <div className="mt-8 max-w-2xl mx-auto">
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+      <h3 className="text-lg font-semibold text-gray-900 mb-3">
+        🔍 Smart Project Finder
+      </h3>
+      <p className="text-sm text-gray-600 mb-4">
+        Enter keywords to find the most relevant and popular projects (e.g., "react api machine learning")
+      </p>
+      
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={keywords}
+          onChange={(e) => setKeywords(e.target.value)}
+          placeholder="e.g., react frontend authentication"
+          className="flex-1 px-4 py-2 text-black rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+        />
+        <button
+          onClick={() => {
+            setIsFiltering(true);
+            // Small delay so UI updates before heavy calculation
+            setTimeout(() => rankRepositories(keywords, repos), 50);
+          }}
+          disabled={isFiltering || !keywords.trim()}
+          className="px-5 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {isFiltering ? "Analyzing..." : "Rank Projects"}
+        </button>
+      </div>
+
+      {keywords.trim() && !isFiltering && filteredRepos.length > 0 && (
+        <div className="mt-4">
+          <p className="text-sm text-gray-500 mb-3">
+            Found {filteredRepos.length} projects ranked by relevance
+          </p>
+          <div className="space-y-3">
+            {filteredRepos.slice(0, 5).map((repo: any) => (
+              <div
+                key={repo.id}
+                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={repo.html_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold text-purple-700 hover:text-purple-900 truncate"
+                    >
+                      {repo.name}
+                    </a>
+                    <span className="px-2 py-0.5 bg-purple-100 text-purple-800 text-xs font-bold rounded-full">
+                      Score: {Math.round(repo.score)}
+                    </span>
+                  </div>
+                  {repo.description && (
+                    <p className="text-sm text-gray-600 mt-1 truncate">
+                      {repo.description}
                     </p>
                   )}
-                  {user.location && (
-                    <p className="mt-1 text-blue-200 text-sm">📍{user.location}</p>
+                </div>
+                <div className="flex items-center gap-3 text-sm text-gray-500 ml-4 shrink-0">
+                  {repo.language && (
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                      {repo.language}
+                    </span>
                   )}
+                  <span>⭐ {repo.stargazers_count}</span>
                 </div>
               </div>
-              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
-              <div className="grid grid-cols-3 divide-x divide-gray-200 border-b border-gray-200">
-                <div className="p-6 text-center">
-                  <p className="text-3xl font-bold text-gray-900">{user.public_repos}</p>
-                  <p className="text-gray-500 text-sm uppercase tracking-wide mt-1">Repositories</p>
-                </div>
-                  <div className="p-6 text-center">
-                  <p className="text-3xl font-bold text-gray-900">{user.followers}</p>
-                  <p className="text-gray-500 text-sm uppercase tracking-wide mt-1">Followers</p>
-                  </div>
-                  <div className="p-6 text-center">
-                    <p className="text-3xl font-bold text-gray-900">{user.following}</p>
-                    <p className="text-gray-500 text-sm uppercase tracking-wide mt-1">Following</p>
-                  </div>
-              </div>
-
-
-              <div className="p-8">
-                  <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-                    <span>📦</span> Top Repositories
-                  </h3>
-
-
-
-                  {repos.length === 0 ? (
-                    <p className="text-gray-500">No Public repositories found.</p>
-                  ):(
-                    <div className="space-y-3">
-                      {repos.map((repo)=> (
-                        <div key={repo.id} className="border border-gray-200 rounded-lg p-4 hover:border-blue-300 hover:shadow-sm transition-all">
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1">
-                              <a
-                                href={repo.html_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-lg font-semibold text-blue-600 hover:text-blue-800 hover:underline"
-                              >
-                                {repo.name}
-                              </a>
-                              {repo.description && (
-                                <p className="text-gray-600 text-sm mt-1">
-                                  {repo.description}
-                                </p>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-4 text-sm text-gray-500 ml-4">
-                              {repo.language && (
-                                <span className="flex items-center gap-1">
-                                  <span className="w-3 h-3 rounded-full bg-blue-500"></span>
-                                  {repo.language}
-                                </span>
-                              )}
-                              <span>⭐ {repo.stargazers_count}</span>
-                              <span>🍴 {repo.forks_count}</span>
-                            </div>
-                          </div>
-                          </div>
-                      ))}
-                      </div>
-                  )}
-              </div>
-
-              <div className="bg-gray-50 p-4 text-center text-sm text-gray-500">
-                Generated from Github data
-                <a
-                href={user.html_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-600 hover:underline ml-1">
-                  View Profile
-                </a>
-              </div>
-            </div>
-          )}
+      {keywords.trim() && !isFiltering && filteredRepos.length === 0 && (
+        <p className="mt-4 text-sm text-red-600">
+          No projects match these keywords. Try different terms.
+        </p>
+      )}
+    </div>
+  </div>
+)}
 
     </main>
     </>
